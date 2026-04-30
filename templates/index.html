@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge Graph Chat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f0f13;
+    --surface: #17171d;
+    --surface2: #1e1e26;
+    --border: #2a2a38;
+    --accent: #7c6ff7;
+    --accent2: #a78bfa;
+    --text: #e8e8f0;
+    --muted: #6b6b80;
+    --user-bg: #1e1a3a;
+    --user-border: #4c3f9f;
+    --bot-bg: #1a2a1e;
+    --bot-border: #2d5a35;
+    --font: 'DM Sans', sans-serif;
+    --mono: 'DM Mono', monospace;
+  }
+
+  html, body {
+    height: 100%;
+    width: 100%;
+    background: var(--bg);
+    font-family: var(--font);
+    color: var(--text);
+    overflow: hidden;
+  }
+
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: 100%;
+    max-width: 860px;
+    margin: 0 auto;
+  }
+
+  /* Header */
+  #header {
+    background: var(--surface);
+    padding: 16px 24px;
+    border-bottom: 0.5px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-shrink: 0;
+  }
+
+  .kg-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #4c3f9f, #7c6ff7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .kg-icon svg {
+    width: 18px;
+    height: 18px;
+    stroke: #fff;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  #title-block { flex: 1; }
+  #title { font-size: 16px; font-weight: 500; letter-spacing: -0.01em; }
+  #subtitle { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  #status {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: #4ade80;
+    font-family: var(--mono);
+  }
+
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #4ade80;
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* Messages area */
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    scroll-behavior: smooth;
+  }
+
+  #messages::-webkit-scrollbar { width: 5px; }
+  #messages::-webkit-scrollbar-track { background: transparent; }
+  #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .msg {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    animation: fadeUp 0.2s ease;
+    max-width: 720px;
+  }
+
+  .msg.user { flex-direction: row-reverse; align-self: flex-end; }
+  .msg.bot { align-self: flex-start; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .avatar {
+    width: 32px; height: 32px;
+    border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  .avatar.u { background: var(--user-bg); border: 0.5px solid var(--user-border); color: var(--accent2); }
+  .avatar.b { background: var(--bot-bg);  border: 0.5px solid var(--bot-border);  color: #4ade80; }
+
+  .bubble {
+    padding: 12px 16px;
+    border-radius: 14px;
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--text);
+    max-width: 640px;
+    word-break: break-word;
+  }
+
+  .msg.user .bubble {
+    background: var(--user-bg);
+    border: 0.5px solid var(--user-border);
+    border-top-right-radius: 4px;
+  }
+
+  .msg.bot .bubble {
+    background: var(--bot-bg);
+    border: 0.5px solid var(--bot-border);
+    border-top-left-radius: 4px;
+  }
+
+  .bubble-time {
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 5px;
+    font-family: var(--mono);
+  }
+
+  .msg.user .bubble-time { text-align: right; }
+
+  /* Typing indicator */
+  .typing {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    padding: 14px 16px;
+  }
+
+  .typing span {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    animation: blink 1.2s infinite;
+  }
+  .typing span:nth-child(2) { animation-delay: .2s; }
+  .typing span:nth-child(3) { animation-delay: .4s; }
+
+  @keyframes blink {
+    0%, 80%, 100% { transform: scale(.7); opacity: .4; }
+    40%            { transform: scale(1);  opacity: 1; }
+  }
+
+  /* Footer */
+  #footer {
+    background: var(--surface);
+    border-top: 0.5px solid var(--border);
+    padding: 14px 24px 20px;
+    flex-shrink: 0;
+  }
+
+  #hints {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  .hint {
+    padding: 6px 12px;
+    border-radius: 20px;
+    background: var(--surface2);
+    border: 0.5px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: border-color .15s, color .15s;
+    font-family: var(--font);
+  }
+
+  .hint:hover { border-color: var(--accent); color: var(--accent2); }
+
+  #form {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  #input {
+    flex: 1;
+    background: var(--surface2);
+    border: 0.5px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 18px;
+    font-size: 14px;
+    font-family: var(--font);
+    color: var(--text);
+    outline: none;
+    transition: border-color .15s;
+    height: 44px;
+  }
+
+  #input::placeholder { color: var(--muted); }
+  #input:focus { border-color: #4c3f9f; }
+
+  #send-btn {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    background: var(--accent);
+    border: none;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: opacity .15s, transform .1s;
+  }
+
+  #send-btn:hover { opacity: .85; }
+  #send-btn:active { transform: scale(.95); }
+  #send-btn svg { width: 16px; height: 16px; fill: #fff; }
+
+  /* Sidebar (decorative graph) */
+  #sidebar {
+    display: none;
+  }
+
+  @media (min-width: 1100px) {
+    #app { max-width: 100%; flex-direction: row; }
+    #main { flex: 1; display: flex; flex-direction: column; min-width: 0; border-right: 0.5px solid var(--border); }
+    #sidebar {
+      display: flex;
+      flex-direction: column;
+      width: 280px;
+      flex-shrink: 0;
+      background: var(--surface);
+      padding: 24px 20px;
+      gap: 20px;
+    }
+    #header { border-right: none; }
+  }
+
+  .side-section { }
+  .side-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-family: var(--mono); margin-bottom: 12px; }
+
+  .node-list { display: flex; flex-direction: column; gap: 8px; }
+  .node-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--surface2);
+    border: 0.5px solid var(--border);
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color .15s;
+  }
+  .node-item:hover { border-color: var(--accent); }
+  .node-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat-card {
+    background: var(--surface2);
+    border: 0.5px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .stat-val { font-size: 20px; font-weight: 500; font-family: var(--mono); color: var(--text); }
+  .stat-lbl { font-size: 11px; color: var(--muted); margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- Main chat column -->
+  <div id="main">
+    <div id="header">
+      <div class="kg-icon">
+        <svg viewBox="0 0 24 24">
+          <circle cx="12" cy="5" r="2"/>
+          <circle cx="5" cy="19" r="2"/>
+          <circle cx="19" cy="19" r="2"/>
+          <line x1="12" y1="7" x2="5" y2="17"/>
+          <line x1="12" y1="7" x2="19" y2="17"/>
+          <line x1="5" y1="19" x2="19" y2="19"/>
+        </svg>
+      </div>
+      <div id="title-block">
+        <div id="title">Knowledge Graph Chat</div>
+        <div id="subtitle">Semantic exploration interface</div>
+      </div>
+      <div id="status"><div class="dot"></div>connected</div>
+    </div>
+
+    <div id="messages">
+      <div class="msg bot">
+        <div class="avatar b">KG</div>
+        <div>
+          <div class="bubble">Hello! I'm your knowledge graph assistant. Ask me anything — I can help you explore concepts, trace relationships, and navigate complex information spaces.</div>
+          <div class="bubble-time">just now</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="footer">
+      <div id="hints">
+        <span class="hint" onclick="quickSend(this)">What is a knowledge graph?</span>
+        <span class="hint" onclick="quickSend(this)">How does semantic search work?</span>
+        <span class="hint" onclick="quickSend(this)">Explain graph embeddings</span>
+        <span class="hint" onclick="quickSend(this)">What is RDF?</span>
+      </div>
+      <div id="form">
+        <input id="input" type="text" placeholder="Ask something..." autocomplete="off" />
+        <button id="send-btn" onclick="sendMsg()">
+          <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sidebar (shows on wide screens) -->
+  <div id="sidebar">
+    <div class="side-section">
+      <div class="side-label">Recent nodes</div>
+      <div class="node-list" id="node-list">
+        <div class="node-item"><div class="node-dot" style="background:#7c6ff7"></div>Knowledge Graph</div>
+        <div class="node-item"><div class="node-dot" style="background:#4ade80"></div>Ontology</div>
+        <div class="node-item"><div class="node-dot" style="background:#f59e0b"></div>Triple Store</div>
+        <div class="node-item"><div class="node-dot" style="background:#f472b6"></div>Semantic Web</div>
+        <div class="node-item"><div class="node-dot" style="background:#38bdf8"></div>SPARQL</div>
+      </div>
+    </div>
+
+    <div class="side-section">
+      <div class="side-label">Graph stats</div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val" id="s-nodes">0</div><div class="stat-lbl">Nodes</div></div>
+        <div class="stat-card"><div class="stat-val" id="s-edges">0</div><div class="stat-lbl">Edges</div></div>
+        <div class="stat-card"><div class="stat-val" id="s-msgs">1</div><div class="stat-lbl">Messages</div></div>
+        <div class="stat-card"><div class="stat-val" id="s-queries">0</div><div class="stat-lbl">Queries</div></div>
+      </div>
+    </div>
+
+    <div class="side-section">
+      <div class="side-label">Mini graph</div>
+      <svg viewBox="0 0 240 180" style="width:100%;opacity:.7">
+        <line x1="120" y1="90" x2="60"  y2="40"  stroke="#2a2a38" stroke-width="1.5"/>
+        <line x1="120" y1="90" x2="180" y2="40"  stroke="#2a2a38" stroke-width="1.5"/>
+        <line x1="120" y1="90" x2="50"  y2="140" stroke="#2a2a38" stroke-width="1.5"/>
+        <line x1="120" y1="90" x2="190" y2="140" stroke="#2a2a38" stroke-width="1.5"/>
+        <line x1="60"  y1="40" x2="180" y2="40"  stroke="#2a2a38" stroke-width="1"/>
+        <line x1="50"  y1="140" x2="190" y2="140" stroke="#2a2a38" stroke-width="1"/>
+        <circle cx="120" cy="90"  r="14" fill="#4c3f9f" stroke="#7c6ff7" stroke-width="1.5"/>
+        <circle cx="60"  cy="40"  r="9"  fill="#1a2a1e" stroke="#2d5a35" stroke-width="1.5"/>
+        <circle cx="180" cy="40"  r="9"  fill="#1a2a1e" stroke="#2d5a35" stroke-width="1.5"/>
+        <circle cx="50"  cy="140" r="9"  fill="#1e1a3a" stroke="#4c3f9f" stroke-width="1.5"/>
+        <circle cx="190" cy="140" r="9"  fill="#1e1a3a" stroke="#4c3f9f" stroke-width="1.5"/>
+        <text x="120" y="94"  text-anchor="middle" font-size="8" fill="#a78bfa" font-family="DM Sans,sans-serif">KG</text>
+        <text x="60"  y="44"  text-anchor="middle" font-size="7" fill="#4ade80" font-family="DM Sans,sans-serif">OWL</text>
+        <text x="180" y="44"  text-anchor="middle" font-size="7" fill="#4ade80" font-family="DM Sans,sans-serif">RDF</text>
+        <text x="50"  y="144" text-anchor="middle" font-size="7" fill="#a78bfa" font-family="DM Sans,sans-serif">NLP</text>
+        <text x="190" y="144" text-anchor="middle" font-size="7" fill="#a78bfa" font-family="DM Sans,sans-serif">ML</text>
+      </svg>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const messagesEl = document.getElementById('messages');
+  const inputEl    = document.getElementById('input');
+  let msgCount = 1;
+  let queryCount = 0;
+
+  function ts() {
+    const n = new Date();
+    return n.getHours().toString().padStart(2,'0') + ':' + n.getMinutes().toString().padStart(2,'0');
+  }
+
+  function addMsg(text, who) {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg ' + who;
+
+    const av = document.createElement('div');
+    av.className = 'avatar ' + (who === 'user' ? 'u' : 'b');
+    av.textContent = who === 'user' ? 'You' : 'KG';
+
+    const inner = document.createElement('div');
+    const bub = document.createElement('div');
+    bub.className = 'bubble';
+    bub.textContent = text;
+
+    const time = document.createElement('div');
+    time.className = 'bubble-time';
+    time.textContent = ts();
+
+    inner.appendChild(bub);
+    inner.appendChild(time);
+    wrap.appendChild(av);
+    wrap.appendChild(inner);
+    messagesEl.appendChild(wrap);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    msgCount++;
+    document.getElementById('s-msgs').textContent = msgCount;
+  }
+
+  function showTyping() {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg bot';
+    wrap.id = 'typing-ind';
+    const av = document.createElement('div');
+    av.className = 'avatar b';
+    av.textContent = 'KG';
+    const bub = document.createElement('div');
+    bub.className = 'bubble typing';
+    bub.innerHTML = '<span></span><span></span><span></span>';
+    wrap.appendChild(av);
+    wrap.appendChild(bub);
+    messagesEl.appendChild(wrap);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function removeTyping() {
+    const t = document.getElementById('typing-ind');
+    if (t) t.remove();
+  }
+
+  async function sendMsg() {
+    const q = inputEl.value.trim();
+    if (!q) return;
+    inputEl.value = '';
+    addMsg(q, 'user');
+    showTyping();
+
+    queryCount++;
+    document.getElementById('s-queries').textContent = queryCount;
+
+    try {
+      const res = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q })
+      });
+      const data = await res.json();
+      removeTyping();
+      addMsg(data.answer, 'bot');
+
+      const n = Math.floor(Math.random() * 5) + queryCount * 3;
+      document.getElementById('s-nodes').textContent = n;
+      document.getElementById('s-edges').textContent = Math.floor(n * 1.6);
+    } catch (e) {
+      removeTyping();
+      addMsg('Could not reach the server. Make sure your /chat endpoint is running.', 'bot');
+    }
+  }
+
+  function quickSend(el) {
+    inputEl.value = el.textContent;
+    inputEl.focus();
+  }
+
+  inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') sendMsg(); });
+</script>
+
+</body>
+</html>

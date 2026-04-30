@@ -670,6 +670,10 @@
     ws.onmessage = (e) => {
       const msg = e.data;
       const lower = msg.toLowerCase();
+      if (msg.includes('Training complete')) {
+        ws.close();
+      }
+    
 
       // Update progress bar from chunk messages like "Processing chunk 3/50 — 6%"
       const pctMatch   = msg.match(/(\d+)%/);

@@ -33,6 +33,137 @@ User → LLM → Cypher → Neo4j → Data → LLM → Answer ✅
 
 ---
 
+## 🧠 Trainer (Build Your Knowledge Graph)
+
+The Trainer lets you **ingest new knowledge into the graph** from a topic (e.g., a company) and watch progress in real time.
+
+### ✨ What it does
+
+```text
+Topic → Wikipedia text → chunking → LLM extracts triples → Neo4j stores graph
+```
+
+* Fetches content (e.g., Wikipedia)
+* Splits into chunks
+* Uses local LLM (Ollama) to extract triples
+* Stores relationships in Neo4j
+* Streams live progress via WebSocket
+
+---
+
+## 🌐 Open the Trainer UI
+
+```text
+http://127.0.0.1:8000/trainer
+```
+
+---
+
+## ▶️ How to use
+
+1. Enter a topic (e.g., `OpenAI`, `Stripe`, `Zoom Video Communications`)
+2. Click **Train**
+3. Watch live logs as data is processed
+
+Example:
+
+```text
+Fetching data for OpenAI...
+12 chunks created
+Processing chunk 1/12
+Processing chunk 2/12
+...
+Training complete ✅
+```
+
+---
+
+## 🔌 API Endpoints
+
+### Start Training
+
+```http
+POST /train?topic=OpenAI
+```
+
+**Response**
+
+```json
+{
+  "job_id": "uuid",
+  "message": "Training started"
+}
+```
+
+### Stream Progress (WebSocket)
+
+```text
+ws://localhost:8000/ws/train/{job_id}
+```
+
+---
+
+## 🧪 Recommended Topics (fast training)
+
+Start with smaller pages to reduce chunk count:
+
+* OpenAI
+* Stripe
+* Notion Labs
+* Zoom Video Communications
+
+> Tip: Limit chunks during dev:
+
+```python
+chunks = chunk_text(text)[:10]
+```
+
+---
+
+## ⚠️ Important Notes
+
+* **Do not use `--reload` during training** (it restarts the server and kills jobs)
+* WebSocket must connect **before or at the start** of training to receive logs
+* In-memory jobs are **not persisted** (lost on restart)
+
+---
+
+## 🛠️ Troubleshooting
+
+**No logs, only ping/pong**
+
+* Ensure WebSocket is connected before training starts
+* Check `send_progress` is `await`ed
+
+**“No WS FOUND”**
+
+* `job_id` mismatch or race condition
+
+**Slow training**
+
+* Use a smaller model (`phi3`) or limit chunks
+
+---
+
+## 🚀 Next Improvements
+
+* Progress bar (% complete)
+* Cancel training job
+* Persist jobs (Redis/DB)
+* De-duplicate triples
+* Live graph visualization
+
+---
+
+## 💡 Design Principle
+
+```text
+Graph = source of truth
+LLM = extractor (training) + formatter (answers)
+```
+
+---
+
 # 🏗️ Architecture
 
 ```

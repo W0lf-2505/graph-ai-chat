@@ -116,6 +116,14 @@
   #messages::-webkit-scrollbar-track { background: transparent; }
   #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
+  #sidebar::-webkit-scrollbar { width: 4px; }
+#sidebar::-webkit-scrollbar-track { background: transparent; }
+#sidebar::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 4px; }
+
+#sidebar-logs::-webkit-scrollbar { width: 3px; }
+#sidebar-logs::-webkit-scrollbar-track { background: transparent; }
+#sidebar-logs::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 3px; }
+
   .msg {
     display: flex;
     gap: 12px;
@@ -332,7 +340,11 @@
         <div id="title">Knowledge Graph Chat</div>
         <div id="subtitle">Semantic exploration interface</div>
       </div>
-      <div id="status"><div class="dot"></div>connected</div>
+      <a href="/trainer" style="margin-left:auto;margin-right:10px;display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;border:0.5px solid var(--border);background:var(--surface2);font-size:12px;color:var(--muted);text-decoration:none;font-family:var(--mono);transition:color .15s,border-color .15s" onmouseover="this.style.color='#a78bfa';this.style.borderColor='#7c6ff7'" onmouseout="this.style.color='';this.style.borderColor=''">
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="12" y1="7" x2="5" y2="17"/><line x1="12" y1="7" x2="19" y2="17"/></svg>
+  Train
+</a>
+<div id="status"><div class="dot"></div>connected</div>
     </div>
 
     <div id="messages">
@@ -385,25 +397,24 @@
     </div>
 
     <div class="side-section">
-      <div class="side-label">Mini graph</div>
-      <svg viewBox="0 0 240 180" style="width:100%;opacity:.7">
-        <line x1="120" y1="90" x2="60"  y2="40"  stroke="#2a2a38" stroke-width="1.5"/>
-        <line x1="120" y1="90" x2="180" y2="40"  stroke="#2a2a38" stroke-width="1.5"/>
-        <line x1="120" y1="90" x2="50"  y2="140" stroke="#2a2a38" stroke-width="1.5"/>
-        <line x1="120" y1="90" x2="190" y2="140" stroke="#2a2a38" stroke-width="1.5"/>
-        <line x1="60"  y1="40" x2="180" y2="40"  stroke="#2a2a38" stroke-width="1"/>
-        <line x1="50"  y1="140" x2="190" y2="140" stroke="#2a2a38" stroke-width="1"/>
-        <circle cx="120" cy="90"  r="14" fill="#4c3f9f" stroke="#7c6ff7" stroke-width="1.5"/>
-        <circle cx="60"  cy="40"  r="9"  fill="#1a2a1e" stroke="#2d5a35" stroke-width="1.5"/>
-        <circle cx="180" cy="40"  r="9"  fill="#1a2a1e" stroke="#2d5a35" stroke-width="1.5"/>
-        <circle cx="50"  cy="140" r="9"  fill="#1e1a3a" stroke="#4c3f9f" stroke-width="1.5"/>
-        <circle cx="190" cy="140" r="9"  fill="#1e1a3a" stroke="#4c3f9f" stroke-width="1.5"/>
-        <text x="120" y="94"  text-anchor="middle" font-size="8" fill="#a78bfa" font-family="DM Sans,sans-serif">KG</text>
-        <text x="60"  y="44"  text-anchor="middle" font-size="7" fill="#4ade80" font-family="DM Sans,sans-serif">OWL</text>
-        <text x="180" y="44"  text-anchor="middle" font-size="7" fill="#4ade80" font-family="DM Sans,sans-serif">RDF</text>
-        <text x="50"  y="144" text-anchor="middle" font-size="7" fill="#a78bfa" font-family="DM Sans,sans-serif">NLP</text>
-        <text x="190" y="144" text-anchor="middle" font-size="7" fill="#a78bfa" font-family="DM Sans,sans-serif">ML</text>
-      </svg>
+      
+    <div class="side-section">
+  <div class="side-label">GRAPH TRAINER</div>
+  <div style="display:flex;flex-direction:column;gap:8px;">
+    <input id="sidebar-topic" type="text" placeholder="Enter topic..." autocomplete="off"
+      style="background:var(--surface2);border:0.5px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;font-family:var(--mono);color:var(--text);outline:none;width:100%;transition:border-color .15s;"
+      onfocus="this.style.borderColor='#4c3f9f'" onblur="this.style.borderColor=''" />
+    <button onclick="startSidebarTraining()"
+      style="width:100%;padding:9px;border-radius:8px;background:var(--accent);border:none;color:#fff;font-size:12px;font-family:var(--font);cursor:pointer;font-weight:500;transition:opacity .15s;"
+      onmouseover="this.style.opacity='.8'" onmouseout="this.style.opacity='1'"
+      id="sidebar-train-btn">⚡ Train</button>
+    <div id="sidebar-train-status" style="font-size:11px;font-family:var(--mono);color:var(--muted);min-height:16px;"></div>
+    <div id="sidebar-progress-track" style="height:3px;background:var(--dim);border-radius:2px;display:none;">
+      <div id="sidebar-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width .4s ease;"></div>
+    </div>
+    <div id="sidebar-logs" style="display:flex;flex-direction:column;gap:3px;max-height:160px;overflow-y:auto;margin-top:4px;"></div>
+  </div>
+</div>
     </div>
   </div>
 
@@ -504,6 +515,78 @@
   }
 
   inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') sendMsg(); });
+
+  let sidebarWs = null;
+
+function sidebarLog(msg, color) {
+  const box = document.getElementById('sidebar-logs');
+  const line = document.createElement('div');
+  line.style.cssText = `font-size:10px;font-family:var(--mono);color:${color || '#c9c9e0'};line-height:1.5;`;
+  line.textContent = msg;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function startSidebarTraining() {
+  const topic = document.getElementById('sidebar-topic').value.trim();
+  if (!topic) { sidebarLog('Enter a topic first', '#ef4444'); return; }
+
+  const btn = document.getElementById('sidebar-train-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Training...';
+  document.getElementById('sidebar-logs').innerHTML = '';
+  document.getElementById('sidebar-train-status').textContent = 'Starting...';
+  document.getElementById('sidebar-progress-track').style.display = 'block';
+  document.getElementById('sidebar-progress-bar').style.width = '0%';
+
+  try {
+    const res = await fetch(`/train?topic=${encodeURIComponent(topic)}`, { method: 'POST' });
+    const data = await res.json();
+    sidebarLog(`Job: ${data.job_id}`, '#6b6b80');
+    connectSidebarWS(data.job_id);
+  } catch (e) {
+    sidebarLog('Failed: ' + e.message, '#ef4444');
+    btn.disabled = false;
+    btn.textContent = '⚡ Train';
+  }
+}
+
+function connectSidebarWS(jobId) {
+  if (sidebarWs) sidebarWs.close();
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  sidebarWs = new WebSocket(`${proto}://${location.host}/ws/train/${jobId}`);
+
+  sidebarWs.onmessage = (e) => {
+    const msg = e.data;
+    const lower = msg.toLowerCase();
+
+    const pctMatch = msg.match(/(\d+)%/);
+    const chunkMatch = msg.match(/(\d+)\/(\d+)/);
+    if (pctMatch) {
+      document.getElementById('sidebar-progress-bar').style.width = pctMatch[1] + '%';
+    } else if (chunkMatch) {
+      const pct = Math.round((parseInt(chunkMatch[1]) / parseInt(chunkMatch[2])) * 100);
+      document.getElementById('sidebar-progress-bar').style.width = pct + '%';
+    }
+
+    document.getElementById('sidebar-train-status').textContent = msg.slice(0, 40);
+
+    if (lower.includes('error'))                                    { sidebarLog(msg, '#ef4444'); }
+    else if (lower.includes('complete') || lower.includes('done')) {
+      sidebarLog(msg, '#22c55e');
+      document.getElementById('sidebar-progress-bar').style.width = '100%';
+      document.getElementById('sidebar-train-btn').disabled = false;
+      document.getElementById('sidebar-train-btn').textContent = '⚡ Train';
+      document.getElementById('sidebar-train-status').textContent = 'Done ✓';
+    }
+    else { sidebarLog(msg, '#6b6b80'); }
+  };
+
+  sidebarWs.onclose = () => {
+    document.getElementById('sidebar-train-btn').disabled = false;
+    document.getElementById('sidebar-train-btn').textContent = '⚡ Train';
+  };
+}
 </script>
 
 </body>

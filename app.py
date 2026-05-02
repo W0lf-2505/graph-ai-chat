@@ -102,22 +102,31 @@ def chunk_text(text, size=1000):
     return [text[i:i+size] for i in range(0, len(text), size)]
 
 async def extract_triples_ollama(chunk):
-    prompt = f"""
-Extract knowledge graph triples from the text.
+    example = '[{"subject": "X", "relation": "RELATION", "object": "Y"}]'
+    empty = '[]'
 
-Rules:
-- Output ONLY valid JSON
-Format:
-[{{"subject": "X", "relation": "RELATION", "object": "Y"}}]
+    prompt = f"""### Task
+    Extract knowledge graph triples from the text below.
 
-If no triples found, output: []
-- Use UPPERCASE relations with underscores
-- Keep entities concise
-- Avoid duplicates
+    ### Output format
+    Output ONLY a JSON array. No explanation. No markdown. No extra text.
 
-Text:
-{chunk}
-"""
+    {example}
+
+    If no triples found, output: {empty}
+
+    ### Rules
+    - relation must be UPPERCASE with underscores: CEO_OF, LOCATED_IN, FOUNDED_BY
+    - subject and object must be concise entity names
+    - No duplicate triples
+    - No nested objects, only flat key-value pairs
+    - Every object must have exactly these 3 keys: subject, relation, object
+
+    ### Text
+    {chunk}
+
+    ### JSON
+    """
     issue = ""
     for attempt in range(3):
         try:
@@ -198,6 +207,9 @@ def parse_triples(raw):
             print(f"JSON parse failed: {e}\nRaw: {raw[:200]}")
             return []
 
+    if not isinstance(triples, list):
+        print(f"Parsed JSON is not a list: {triples}")
+        return []
     cleaned = []
     for t in triples:
         if all(k in t for k in ("subject", "relation", "object")):

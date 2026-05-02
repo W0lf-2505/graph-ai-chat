@@ -1,4 +1,7 @@
-from fastapi import FastAPI, Request
+from urllib import response
+
+from click import prompt
+from fastapi import FastAPI, Request, Query as FastAPIQuery
 from pydantic import BaseModel
 from neo4j import GraphDatabase
 from fastapi.responses import HTMLResponse
@@ -17,6 +20,7 @@ import re
 import asyncio
 import uuid
 import wikipedia
+import traceback
 
 
 NEO4J_URI = os.getenv("NEO4J_URI")
@@ -52,6 +56,13 @@ app = FastAPI()
 if missing:
     raise RuntimeError(f"Missing env vars: {missing}")
 
+def safe_json_load(s):
+    if not s or not s.strip():
+        return None
+    try:
+        return json.loads(s)
+    except Exception as e:
+        return None
 
 def insert_triple(tx, s, r, o):
     query = f"""
@@ -62,6 +73,8 @@ def insert_triple(tx, s, r, o):
     tx.run(query, s=s, o=o)
 
 def store_triples(triples):
+    if not triples:
+        return
     with driver.session() as session:
         for t in triples:
             relation = clean_relation(t["relation"])
@@ -85,9 +98,6 @@ def clean_relation(rel):
     
     return rel
 
-def get_text(topic):
-    return wikipedia.page(topic).content
-
 def chunk_text(text, size=1000):
     return [text[i:i+size] for i in range(0, len(text), size)]
 
@@ -108,17 +118,73 @@ If no triples found, output: []
 Text:
 {chunk}
 """
+    issue = ""
+    for attempt in range(3):
+        try:
+            res = requests.post(
+                OLLAMA_URL,
+                json={"model": MODEL, "prompt": prompt+issue, "stream": False},
+                timeout=60
+            )
+            raw = res.json()["response"]
+
+            # Check it's not empty or whitespace
+            if not raw or not raw.strip():
+                print(f"Attempt {attempt+1}/{3}: Empty response, retrying...")
+                issue = "\nThe previous response was empty. Please provide valid JSON or [] if no triples."
+                continue
+
+            # Check it's not just "[]" (empty JSON array)
+            if raw.strip() in ("[]", "[ ]"):
+                print(f"Attempt {attempt+1}/{3}: Got empty array, retrying...")
+                issue = "\nThe previous response was an empty array. If there are no triples, please confirm with [] without extra text."
+                continue
+            try:
+                parsed = safe_json_load(raw)
+                if not isinstance(parsed, list):
+                    print(f"Attempt {attempt+1}/{3}: Not a list, retrying...")
+                    issue = "\nThe previous response was not a JSON array. Please output a JSON array of triples."
+                    continue
+
+                valid = all(
+                    isinstance(t, dict) and
+                    all(k in t for k in ("subject", "relation", "object")) and
+                    all(isinstance(t[k], str) and t[k].strip() for k in ("subject", "relation", "object"))
+                    for t in parsed
+                )
+
+                if not valid:
+                    print(f"Attempt {attempt+1}/{3}: Invalid triple format, retrying...")
+                    issue = "\nThe previous response had invalid triple format. Each triple should be a JSON object with non-empty 'subject', 'relation', and 'object' string fields."
+                    continue
+
+            except Exception as e:
+                print(f"Attempt {attempt+1}/{3}: JSON validation failed: {e}, retrying...")
+                issue = "\nThe previous response was not valid JSON. Please ensure the output is a JSON array of triples."
+                continue
+
+            print(f"LLM raw response ({len(raw)} chars): {repr(raw[:300])}")
+            return raw.strip()
+        except (requests.exceptions.JSONDecodeError, KeyError, ValueError) as e:
+            print(f"Attempt {attempt+1}: Bad response from Ollama: {e}")
+            if attempt == 3 - 1:
+                raise RuntimeError(f"Ollama failed after {3} attempts: {e}")
+            continue
+        except requests.exceptions.RequestException as e:
+            print(f"Attempt {attempt+1}: Request failed: {e}")
+            if attempt == 3 - 1:
+                raise RuntimeError(f"Ollama request failed: {e}")
+            continue
     async with httpx.AsyncClient(timeout=120) as client:
         response = await client.post(
             OLLAMA_URL,
             json={"model": ANSWER_MODEL, "prompt": prompt, "stream": False}
         )
-    return response.json()["response"]
 
 def parse_triples(raw):
     try:
         # Try direct parse first
-        triples = json.loads(raw)
+        triples = safe_json_load(raw)
         
     except:
         # Find JSON array anywhere in the response
@@ -127,7 +193,7 @@ def parse_triples(raw):
             print(f"No JSON found in: {raw[:200]}")
             return []
         try:
-            triples = json.loads(match.group(0))
+            triples = safe_json_load(match.group(0))
         except Exception as e:
             print(f"JSON parse failed: {e}\nRaw: {raw[:200]}")
             return []
@@ -146,10 +212,27 @@ async def train_job(job_id, topic):
     try:
         await send_progress(job_id, f"Fetching data for {topic}...")
         try:
-            page = wikipedia.page(topic, auto_suggest=False)
+            # auto_suggest=False + exact title from search = no disambiguation needed
+            results = wikipedia.search(topic)
+
+            if not results:
+                await send_progress(job_id, "❌ No results found")
+                return
+
+            page_title = results[0]
+
+            await send_progress(job_id, f"Using page: {page_title}")
+
+            page = wikipedia.page(page_title, auto_suggest=False)
         except wikipedia.DisambiguationError as e:
-            # Pick the first option that contains the topic name
-            best = next((opt for opt in e.options if topic.lower() in opt.lower()), e.options[0])
+            # Only hits if user typed manually — pick option matching topic exactly first
+            best = next(
+                (opt for opt in e.options if opt.lower() == topic.lower()),  # exact match first
+                next(
+                    (opt for opt in e.options if topic.lower() in opt.lower()),  # partial match second
+                    e.options[0]  # fallback to first
+                )
+            )
             await send_progress(job_id, f"Disambiguation: using '{best}'")
             page = wikipedia.page(best, auto_suggest=False)
         except wikipedia.PageError:
@@ -166,7 +249,12 @@ async def train_job(job_id, topic):
             pct = round(((i + 1) / total) * 100)
             await send_progress(job_id, f"Processing chunk {i+1}/{total} — {pct}%")
 
-            raw = await extract_triples_ollama(chunk)  # now async
+            try:
+                raw = await extract_triples_ollama(chunk)
+            except RuntimeError as e:
+                print(f"Chunk {i+1} skipped after all retries: {e}")
+                await asyncio.sleep(0)
+                continue  # now async
             triples = parse_triples(raw)
 
             if triples:
@@ -177,6 +265,7 @@ async def train_job(job_id, topic):
         await send_progress(job_id, "Training complete ✅")
 
     except Exception as e:
+        traceback.print_exc()
         await send_progress(job_id, f"Error: {str(e)}")
     finally:
         connections.pop(job_id, None)
@@ -192,13 +281,20 @@ async def send_progress(job_id, message):
 def extract_cypher(text):
     text = text.strip()
 
-    # Remove markdown / backticks
+     # Remove markdown fences
     text = text.replace("```cypher", "").replace("```", "").replace("`", "").strip()
 
-    # Fix Mistral's markdown links: [ceo.name](http://...) → ceo.name
+    # Fix markdown links: [model.name](http://...) → model.name
     text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
 
-    # Fix "Label as Alias" → just remove " as Alias" inside node patterns
+    # Fix quoted aliases: AS 'business model' → AS business_model
+    text = re.sub(r"AS\s+'([^']+)'", lambda m: "AS " + m.group(1).replace(" ", "_"), text)
+    text = re.sub(r'AS\s+"([^"]+)"', lambda m: "AS " + m.group(1).replace(" ", "_"), text)
+
+    # Remove trailing semicolon
+    text = text.rstrip(";").strip()
+
+    # Fix "Label as Alias" → correct alias before label
     text = re.sub(r':(\w+)\s+as\s+(\w+)', r':\1', text, flags=re.IGNORECASE)
 
     # Find first MATCH or WITH
@@ -231,53 +327,39 @@ def clean_cypher(text):
 
 # ---------------- LLM: Generate Cypher ----------------
 def generate_cypher(question, error=None):
-    prompt = f"""
-You are a Neo4j Cypher query generator. Output ONLY a valid Cypher query. Nothing else.
+    prompt = f"""### Task
+    Convert the user question into a single Neo4j Cypher query.
 
-STRICT RULES — violating any rule will cause an error:
-1. Start with MATCH. No WITH before MATCH.
-2. NEVER use filter() — it was removed in Neo4j 4.x. Use list comprehensions instead: [x IN list WHERE condition]
-3. NEVER use collect() or complex aggregations unless absolutely necessary.
-4. NEVER use relationships() function on a node — only on a path.
-5. NEVER use [*] unbounded traversal — always set a limit like [*1..3].
-6. NEVER use type() on a list — only on a single relationship variable.
-7. Keep queries simple. One MATCH clause is almost always enough.
-8. RETURN only the variables you explicitly matched. Never return unbound variables.
-9. All string values are case-sensitive. Use toLower() if unsure.
-10. No explanation. No markdown. No backticks. No comments. Just the Cypher query.
+    ### Schema
+    Nodes: (Entity {{name: string}})
+    Relationships: [:CEO_OF], [:LOCATED_IN], [:OPERATES_IN]
 
+    ### Rules
+    - Output ONLY the Cypher query, nothing else
+    - Start with MATCH
+    - No markdown, no backticks, no explanation
+    - Node alias before label: (e:Entity) not (:Entity as e)
+    - Property access: e.name not [e.name](url)
+    - No filter(), no unbounded [*], no relationships() on a node
 
-- Property access is written as: n.name — never as [n.name](url)
-- Node aliases go BEFORE the label: (company:Entity) — never (:Entity as company)
-- Do not use markdown formatting of any kind in the output
-- Output must be plain text only — no links, no bold, no italics
+    ### Examples
+    Q: Who is the CEO of Tesla?
+    A: MATCH (e:Entity {{name: 'Tesla'}})-[:CEO_OF]->(ceo:Entity) RETURN ceo.name
 
-ALLOWED SCHEMA — only these exist:
-  (Entity {{name: string}})-[:CEO_OF]->(Entity)
-  (Entity {{name: string}})-[:LOCATED_IN]->(Entity)
-  (Entity {{name: string}})-[:OPERATES_IN]->(Entity)
+    Q: Where is Apple located?
+    A: MATCH (e:Entity {{name: 'Apple'}})-[:LOCATED_IN]->(loc:Entity) RETURN loc.name
 
-GOOD EXAMPLES:
-  Q: Who is the CEO of Tesla?
-  A: MATCH (e:Entity {{name: 'Tesla'}})-[:CEO_OF]->(ceo:Entity) RETURN ceo.name
+    Q: What sectors does Google operate in?
+    A: MATCH (e:Entity {{name: 'Google'}})-[:OPERATES_IN]->(sector:Entity) RETURN sector.name
 
-  Q: Where is Apple located?
-  A: MATCH (e:Entity {{name: 'Apple'}})-[:LOCATED_IN]->(loc:Entity) RETURN loc.name
+    Q: What do you know about Tesla?
+    A: MATCH (e:Entity {{name: 'Tesla'}})-[r]->(n:Entity) RETURN type(r) AS relationship, n.name AS value
 
-  Q: What sectors does Google operate in?
-  A: MATCH (e:Entity {{name: 'Google'}})-[:OPERATES_IN]->(sector:Entity) RETURN sector.name
-
-  Q: What do you know about Tesla?
-  A: MATCH (e:Entity {{name: 'Tesla'}})-[r]->(n:Entity) RETURN type(r) AS relationship, n.name AS value
-
-BAD EXAMPLES — never generate these:
-  ❌ filter(x in list WHERE ...)         — removed in Neo4j 4.x
-  ❌ WITH x MATCH ...                    — MATCH must come first
-  ❌ MATCH (n)-[*]->(m)                  — unbounded traversal
-  ❌ type(relationships(node)[0])        — relationships() needs a path not a node
-  ❌ RETURN n, m, collect(...), filter() — overly complex, keep it simple
-
-"""
+    ### Examples of what NOT to do
+    - RETURN [n.name](http://n.name)     — never use markdown links
+    - RETURN n.name AS 'my alias'        — never quote aliases, use AS myAlias
+    - MATCH ... ;                        — no semicolons
+    """
 
     if error:
         prompt += f"""
@@ -291,13 +373,26 @@ Fix the query.
 Question:
 {question}
 """
-
-    res = requests.post(
-        OLLAMA_URL,
-        json={"model": MODEL, "prompt": prompt, "stream": False}
-    )
-
-    return res.json()["response"].strip()
+    for attempt in range(3):
+            try:
+                res = requests.post(
+                    OLLAMA_URL,
+                    json={"model": MODEL, "prompt": prompt, "stream": False},
+                    timeout=60
+                )
+                res.raise_for_status()
+                data = res.json()
+                return data["response"].strip()
+            except (requests.exceptions.JSONDecodeError, KeyError, ValueError) as e:
+                print(f"Attempt {attempt+1}: Bad response from Ollama: {e}")
+                if attempt == 3 - 1:
+                    raise RuntimeError(f"Ollama failed after {3} attempts: {e}")
+                continue
+            except requests.exceptions.RequestException as e:
+                print(f"Attempt {attempt+1}: Request failed: {e}")
+                if attempt == 3 - 1:
+                    raise RuntimeError(f"Ollama request failed: {e}")
+                continue
 
 # ---------------- RUN CYPHER ----------------
 def run_query(cypher):
@@ -410,5 +505,20 @@ async def train_ws(websocket: WebSocket, job_id: str):
     try:
         while True:
             await websocket.receive_text()
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
+        pass  # client disconnected or WS already closed
+    finally:
         connections.pop(job_id, None)
+
+@app.get("/search")
+def search_wiki(q: str = FastAPIQuery(..., min_length=3)):
+    try:
+        results = wikipedia.search(q, results=5)
+
+        return {
+            "query": q,
+            "results": results
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
